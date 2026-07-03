@@ -15,22 +15,22 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
-  StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
 
   @override
   void initState() {
     super.initState();
-    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
-      _adapterState = state;
-      if (mounted) {
-        setState(() {});
-      }
+    _adapterStateSub = FlutterBluePlus.adapterState.listen((state) {
+      if (!mounted) return;
+      setState(() {
+        _adapterState = state;
+      });
     });
   }
 
   @override
   void dispose() {
-    _adapterStateSubscription?.cancel();
+    _adapterStateSub?.cancel();
     super.dispose();
   }
 
@@ -97,13 +97,20 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  List<ScanResult> devices = [];
+  final List<ScanResult> devices = [];
   bool scanning = false;
-  StreamSubscription<List<ScanResult>>? _scanSubscription;
+
+  BluetoothDevice? connectedDevice;
+  BluetoothConnectionState connectionState =
+      BluetoothConnectionState.disconnected;
+
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
 
   @override
   void dispose() {
-    _scanSubscription?.cancel();
+    _scanSub?.cancel();
+    _connSub?.cancel();
     super.dispose();
   }
 
@@ -113,11 +120,13 @@ class _HomePageState extends State<HomePage> {
       scanning = true;
     });
 
-    await _scanSubscription?.cancel();
-    _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+    await _scanSub?.cancel();
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
       if (!mounted) return;
       setState(() {
-        devices = results;
+        devices
+          ..clear()
+          ..addAll(results);
       });
     });
 
@@ -131,18 +140,72 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void connectToDevice(BluetoothDevice device) {
-    final name = device.platformName.isEmpty
-        ? "Device inconnu"
-        : device.platformName;
+  Future<void> connectToDevice(BluetoothDevice device) async {
+    try {
+      await FlutterBluePlus.stopScan();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Appareil sélectionné : $name")),
-    );
+      await _connSub?.cancel();
+      _connSub = device.connectionState.listen((state) {
+        if (!mounted) return;
+        setState(() {
+          connectionState = state;
+        });
+      });
+
+      await device.connect(
+        license: License.bsd,
+        timeout: const Duration(seconds: 10),
+        autoConnect: false,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        connectedDevice = device;
+      });
+
+      final name =
+          device.platformName.isEmpty ? "Device inconnu" : device.platformName;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Connecté à $name")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur connexion: $e")),
+      );
+    }
+  }
+
+  Future<void> disconnectDevice() async {
+    try {
+      if (connectedDevice == null) return;
+
+      await connectedDevice!.disconnect();
+
+      if (!mounted) return;
+      setState(() {
+        connectedDevice = null;
+        connectionState = BluetoothConnectionState.disconnected;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Déconnecté")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur déconnexion: $e")),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final connectedName = connectedDevice == null
+        ? "Aucune"
+        : (connectedDevice!.platformName.isEmpty
+            ? "Device inconnu"
+            : connectedDevice!.platformName);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text("ESP32 BLE Dashboard"),
@@ -151,28 +214,46 @@ class _HomePageState extends State<HomePage> {
             icon: const Icon(Icons.refresh),
             onPressed: scanning ? null : startScan,
           ),
+          IconButton(
+            icon: const Icon(Icons.link_off),
+            onPressed: connectedDevice == null ? null : disconnectDevice,
+          ),
         ],
       ),
       body: Column(
         children: [
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text("Connecté : $connectedName"),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  "État : ${connectionState.name}",
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           ElevatedButton(
             onPressed: scanning ? null : startScan,
             child: Text(scanning ? "Scan..." : "Scanner Bluetooth"),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Expanded(
             child: ListView.builder(
               itemCount: devices.length,
               itemBuilder: (context, index) {
                 final d = devices[index].device;
+                final name =
+                    d.platformName.isEmpty ? "Device inconnu" : d.platformName;
 
                 return ListTile(
-                  title: Text(
-                    d.platformName.isEmpty
-                        ? "Device inconnu"
-                        : d.platformName,
-                  ),
+                  title: Text(name),
                   subtitle: Text(d.remoteId.toString()),
                   trailing: ElevatedButton(
                     onPressed: () => connectToDevice(d),

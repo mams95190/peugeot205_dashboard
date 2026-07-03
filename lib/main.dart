@@ -98,7 +98,9 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final List<ScanResult> devices = [];
+  final List<BluetoothService> services = [];
   bool scanning = false;
+  bool discovering = false;
 
   BluetoothDevice? connectedDevice;
   BluetoothConnectionState connectionState =
@@ -118,6 +120,10 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       devices.clear();
       scanning = true;
+      discovering = false;
+      services.clear();
+      connectedDevice = null;
+      connectionState = BluetoothConnectionState.disconnected;
     });
 
     await _scanSub?.cancel();
@@ -186,6 +192,8 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         connectedDevice = null;
         connectionState = BluetoothConnectionState.disconnected;
+        discovering = false;
+        services.clear();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -194,6 +202,38 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Erreur déconnexion: $e")),
+      );
+    }
+  }
+
+  Future<void> discoverDeviceServices() async {
+    final device = connectedDevice;
+    if (device == null) return;
+
+    try {
+      setState(() {
+        discovering = true;
+        services.clear();
+      });
+
+      final found = await device.discoverServices();
+
+      if (!mounted) return;
+      setState(() {
+        services.addAll(found);
+        discovering = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("${found.length} service(s) trouvé(s)")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        discovering = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur discoverServices: $e")),
       );
     }
   }
@@ -239,28 +279,81 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: scanning ? null : startScan,
-            child: Text(scanning ? "Scan..." : "Scanner Bluetooth"),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: scanning ? null : startScan,
+                child: Text(scanning ? "Scan..." : "Scanner Bluetooth"),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed:
+                    (connectedDevice == null || discovering) ? null : discoverDeviceServices,
+                child: Text(discovering ? "Services..." : "Discover services"),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: ListView.builder(
-              itemCount: devices.length,
-              itemBuilder: (context, index) {
-                final d = devices[index].device;
-                final name =
-                    d.platformName.isEmpty ? "Device inconnu" : d.platformName;
-
-                return ListTile(
-                  title: Text(name),
-                  subtitle: Text(d.remoteId.toString()),
-                  trailing: ElevatedButton(
-                    onPressed: () => connectToDevice(d),
-                    child: const Text("Connect"),
+            child: ListView(
+              children: [
+                if (devices.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      "Appareils trouvés",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                );
-              },
+                  for (final result in devices)
+                    ListTile(
+                      title: Text(
+                        result.device.platformName.isEmpty
+                            ? "Device inconnu"
+                            : result.device.platformName,
+                      ),
+                      subtitle: Text(result.device.remoteId.toString()),
+                      trailing: ElevatedButton(
+                        onPressed: () => connectToDevice(result.device),
+                        child: const Text("Connect"),
+                      ),
+                    ),
+                ],
+                if (services.isNotEmpty) ...[
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(
+                      "Services BLE",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  for (final s in services)
+                    Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Service: ${s.uuid}",
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            for (final c in s.characteristics)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 6),
+                                child: Text(
+                                  "• Char: ${c.uuid}",
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ],
             ),
           ),
         ],

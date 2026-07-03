@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -99,6 +100,7 @@ class _HomePageState extends State<HomePage> {
 
   bool scanning = false;
   bool discovering = false;
+  String permissionDebug = 'Pas encore testé';
 
   BluetoothDevice? connectedDevice;
   BluetoothConnectionState connectionState =
@@ -115,13 +117,28 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<bool> _requestPermissions() async {
-    final statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.locationWhenInUse,
-    ].request();
+    if (!Platform.isAndroid) {
+      return true;
+    }
 
-    return statuses.values.every((s) => s.isGranted || s.isLimited);
+    final scanStatus = await Permission.bluetoothScan.request();
+    final connectStatus = await Permission.bluetoothConnect.request();
+
+    PermissionStatus locationStatus = PermissionStatus.granted;
+    try {
+      locationStatus = await Permission.locationWhenInUse.request();
+    } catch (_) {}
+
+    final ok = scanStatus.isGranted && connectStatus.isGranted;
+
+    permissionDebug =
+        'scan=$scanStatus | connect=$connectStatus | location=$locationStatus';
+
+    if (mounted) {
+      setState(() {});
+    }
+
+    return ok;
   }
 
   Future<void> startScan() async {
@@ -130,7 +147,7 @@ class _HomePageState extends State<HomePage> {
     if (!ok) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permissions Bluetooth refusées')),
+        SnackBar(content: Text('Permissions Bluetooth refusées: $permissionDebug')),
       );
       return;
     }
@@ -154,9 +171,16 @@ class _HomePageState extends State<HomePage> {
       });
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
-    await Future.delayed(const Duration(seconds: 8));
-    await FlutterBluePlus.stopScan();
+    try {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+      await Future.delayed(const Duration(seconds: 8));
+      await FlutterBluePlus.stopScan();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur scan: $e')),
+      );
+    }
 
     if (!mounted) return;
     setState(() => scanning = false);
@@ -279,6 +303,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> openPermissions() async {
+    await openAppSettings();
+  }
+
   @override
   Widget build(BuildContext context) {
     final connectedName = connectedDevice == null
@@ -294,6 +322,10 @@ class _HomePageState extends State<HomePage> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: scanning ? null : startScan,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: openPermissions,
           ),
           IconButton(
             icon: const Icon(Icons.link_off),
@@ -315,6 +347,14 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Permissions: $permissionDebug',
+              style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
             ),
           ),
           const SizedBox(height: 12),

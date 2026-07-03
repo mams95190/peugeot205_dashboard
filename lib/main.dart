@@ -36,38 +36,29 @@ class _HomePageState extends State<HomePage> {
       scanning = true;
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
-
     FlutterBluePlus.scanResults.listen((results) {
+      if (!mounted) return;
       setState(() {
         devices = results;
       });
     });
 
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
     await Future.delayed(const Duration(seconds: 5));
-
     await FlutterBluePlus.stopScan();
 
+    if (!mounted) return;
     setState(() {
       scanning = false;
     });
   }
 
   void connectToDevice(BluetoothDevice device) async {
-    try {
-      await device.connect(
-        license: License.personal,
-        timeout: const Duration(seconds: 10),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Connecté à ${device.platformName}")),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erreur: $e")),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Appareil sélectionné : ${device.platformName.isEmpty ? "Device inconnu" : device.platformName}"),
+      ),
+    );
   }
 
   @override
@@ -78,8 +69,8 @@ class _HomePageState extends State<HomePage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: startScan,
-          )
+            onPressed: scanning ? null : startScan,
+          ),
         ],
       ),
       body: Column(
@@ -98,9 +89,7 @@ class _HomePageState extends State<HomePage> {
 
                 return ListTile(
                   title: Text(
-                    d.platformName.isEmpty
-                        ? "Device inconnu"
-                        : d.platformName,
+                    d.platformName.isEmpty ? "Device inconnu" : d.platformName,
                   ),
                   subtitle: Text(d.remoteId.toString()),
                   trailing: ElevatedButton(

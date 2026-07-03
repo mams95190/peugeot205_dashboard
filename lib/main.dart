@@ -53,11 +53,13 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  void connectToDevice(BluetoothDevice device) async {
+  void connectToDevice(BluetoothDevice device) {
+    final name = device.platformName.isEmpty
+        ? "Device inconnu"
+        : device.platformName;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Appareil sélectionné : ${device.platformName.isEmpty ? "Device inconnu" : device.platformName}"),
-      ),
+      SnackBar(content: Text("Appareil sélectionné : $name")),
     );
   }
 
@@ -89,7 +91,9 @@ class _HomePageState extends State<HomePage> {
 
                 return ListTile(
                   title: Text(
-                    d.platformName.isEmpty ? "Device inconnu" : d.platformName,
+                    d.platformName.isEmpty
+                        ? "Device inconnu"
+                        : d.platformName,
                   ),
                   subtitle: Text(d.remoteId.toString()),
                   trailing: ElevatedButton(

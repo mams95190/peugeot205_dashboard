@@ -1,0 +1,110 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <math.h>
+
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+
+const char* AP_SSID = "peugeot 205";
+const char* AP_PASS = "";
+WebServer server(80);
+
+#define BLE_DEVICE_NAME "Peugeot205-ESP32"
+#define BLE_SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define BLE_CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+BLEServer* pServer = nullptr;
+BLECharacteristic* pCharacteristic = nullptr;
+bool bleClientConnected = false;
+unsigned long bleLastSend = 0;
+
+class MyServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    bleClientConnected = true;
+  }
+
+  void onDisconnect(BLEServer* pServer) {
+    bleClientConnected = false;
+    delay(200);
+    BLEDevice::startAdvertising();
+  }
+};
+
+void setupBLE() {
+  BLEDevice::init(BLE_DEVICE_NAME);
+
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(BLE_SERVICE_UUID);
+
+  pCharacteristic = pService->createCharacteristic(
+    BLE_CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ |
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+
+  pCharacteristic->addDescriptor(new BLE2902());
+  pCharacteristic->setValue("boot");
+
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+
+  BLEAdvertisementData adv;
+  adv.setName(BLE_DEVICE_NAME);
+  adv.setCompleteServices(BLEUUID(BLE_SERVICE_UUID));
+
+  pAdvertising->setAdvertisementData(adv);
+  pAdvertising->setScanResponse(true);
+
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
+
+  BLEDevice::startAdvertising();
+
+  delay(500);
+
+  Serial.println("BLE advertising OK");
+}
+
+void sendBleIfNeeded() {
+  if (!bleClientConnected || pCharacteristic == nullptr) return;
+
+  if (millis() - bleLastSend < 500) return;
+  bleLastSend = millis();
+
+  String payload = "{\"status\":\"ok\"}";
+  pCharacteristic->setValue(payload.c_str());
+  pCharacteristic->notify();
+}
+
+void handleRoot() {
+  server.send(200, "text/plain", "ESP32 OK");
+}
+
+void setupWeb() {
+  server.on("/", handleRoot);
+  server.begin();
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(300);
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+
+  setupWeb();
+  setupBLE();
+
+  Serial.println("READY");
+  Serial.println(WiFi.softAPIP());
+}
+
+void loop() {
+  server.handleClient();
+  sendBleIfNeeded();
+}

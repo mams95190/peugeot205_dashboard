@@ -90,7 +90,6 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_blue_plus
-      sha256: "REGENERATE_BY_CI_OR_LOCAL_PUB_GET"
       url: "https://pub.dev"
     source: hosted
     version: "2.3.10"

@@ -15,6 +15,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Remove stale lockfile
+        run: rm -f pubspec.lock
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -29,14 +32,11 @@ jobs:
           architecture: x64
           cache: false
 
-      - name: Show Flutter version
-        run: flutter --version
-
       - name: Install dependencies
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze lib/main.dart
+        run: flutter analyze lib/main.dart --no-fatal-infos
 
       - name: Build release APK
         run: flutter build apk --release

@@ -36,7 +36,7 @@ class _HomePageState extends State<HomePage> {
       scanning = true;
     });
 
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
 
     FlutterBluePlus.scanResults.listen((results) {
       setState(() {
@@ -46,7 +46,7 @@ class _HomePageState extends State<HomePage> {
 
     await Future.delayed(const Duration(seconds: 5));
 
-    FlutterBluePlus.stopScan();
+    await FlutterBluePlus.stopScan();
 
     setState(() {
       scanning = false;
@@ -55,9 +55,13 @@ class _HomePageState extends State<HomePage> {
 
   void connectToDevice(BluetoothDevice device) async {
     try {
-      await device.connect(license: License.personal, timeout: const Duration(seconds: 10));
+      await device.connect(
+        license: License.personal,
+        timeout: const Duration(seconds: 10),
+      );
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Connecté à ${device.name}")),
+        SnackBar(content: Text("Connecté à ${device.platformName}")),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -93,8 +97,12 @@ class _HomePageState extends State<HomePage> {
                 final d = devices[index].device;
 
                 return ListTile(
-                  title: Text(d.name.isEmpty ? "Device inconnu" : d.name),
-                  subtitle: Text(d.id.toString()),
+                  title: Text(
+                    d.platformName.isEmpty
+                        ? "Device inconnu"
+                        : d.platformName,
+                  ),
+                  subtitle: Text(d.remoteId.toString()),
                   trailing: ElevatedButton(
                     onPressed: () => connectToDevice(d),
                     child: const Text("Connect"),

@@ -153,6 +153,7 @@ class _HomePageState extends State<HomePage> {
       });
 
       await device.connect(
+        license: License.free,
         timeout: const Duration(seconds: 10),
         autoConnect: false,
       );

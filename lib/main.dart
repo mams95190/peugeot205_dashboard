@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
@@ -238,6 +239,32 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String bytesToText(List<int> bytes) {
+    if (bytes.isEmpty) return "(vide)";
+    try {
+      return utf8.decode(bytes, allowMalformed: true);
+    } catch (_) {
+      return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+    }
+  }
+
+  Future<void> readCharacteristic(BluetoothCharacteristic c) async {
+    try {
+      final value = await c.read();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Read ${c.uuid}: ${bytesToText(value)}"),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur read ${c.uuid}: $e")),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final connectedName = connectedDevice == null
@@ -288,8 +315,9 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(width: 12),
               ElevatedButton(
-                onPressed:
-                    (connectedDevice == null || discovering) ? null : discoverDeviceServices,
+                onPressed: (connectedDevice == null || discovering)
+                    ? null
+                    : discoverDeviceServices,
                 child: Text(discovering ? "Services..." : "Discover services"),
               ),
             ],
@@ -330,7 +358,10 @@ class _HomePageState extends State<HomePage> {
                   ),
                   for (final s in services)
                     Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
@@ -338,14 +369,24 @@ class _HomePageState extends State<HomePage> {
                           children: [
                             Text(
                               "Service: ${s.uuid}",
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             for (final c in s.characteristics)
                               Padding(
-                                padding: const EdgeInsets.only(bottom: 6),
-                                child: Text(
-                                  "• Char: ${c.uuid}",
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text("Char: ${c.uuid}"),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () => readCharacteristic(c),
+                                      child: const Text("Read"),
+                                    ),
+                                  ],
                                 ),
                               ),
                           ],

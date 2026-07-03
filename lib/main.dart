@@ -75,7 +75,11 @@ class BluetoothOffPage extends StatelessWidget {
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 22)),
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 22),
+          ),
         ),
       ),
     );
@@ -84,6 +88,7 @@ class BluetoothOffPage extends StatelessWidget {
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -91,11 +96,13 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final List<ScanResult> devices = [];
   final List<BluetoothService> services = [];
+
   bool scanning = false;
   bool discovering = false;
 
   BluetoothDevice? connectedDevice;
-  BluetoothConnectionState connectionState = BluetoothConnectionState.disconnected;
+  BluetoothConnectionState connectionState =
+      BluetoothConnectionState.disconnected;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
@@ -113,11 +120,13 @@ class _HomePageState extends State<HomePage> {
       Permission.bluetoothConnect,
       Permission.locationWhenInUse,
     ].request();
+
     return statuses.values.every((s) => s.isGranted || s.isLimited);
   }
 
   Future<void> startScan() async {
     final ok = await _requestPermissions();
+
     if (!ok) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -145,12 +154,16 @@ class _HomePageState extends State<HomePage> {
       });
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
-    await Future.delayed(const Duration(seconds: 5));
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+    await Future.delayed(const Duration(seconds: 8));
     await FlutterBluePlus.stopScan();
 
     if (!mounted) return;
     setState(() => scanning = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${devices.length} périphérique(s) trouvé(s)')),
+    );
   }
 
   Future<void> connectToDevice(BluetoothDevice device) async {
@@ -164,7 +177,6 @@ class _HomePageState extends State<HomePage> {
       });
 
       await device.connect(
-        license: License.nonprofit,
         timeout: const Duration(seconds: 10),
         autoConnect: false,
       );
@@ -192,7 +204,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> disconnectDevice() async {
     try {
       if (connectedDevice == null) return;
+
       await connectedDevice!.disconnect();
+
       if (!mounted) return;
       setState(() {
         connectedDevice = null;
@@ -200,6 +214,10 @@ class _HomePageState extends State<HomePage> {
         discovering = false;
         services.clear();
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Déconnecté')),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur déconnexion: $e')),
@@ -292,7 +310,10 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Expanded(child: Text('Connecté : $connectedName')),
                 const SizedBox(width: 12),
-                Text('État : ${connectionState.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  'État : ${connectionState.name}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ],
             ),
           ),
@@ -306,7 +327,9 @@ class _HomePageState extends State<HomePage> {
               ),
               const SizedBox(width: 12),
               ElevatedButton(
-                onPressed: (connectedDevice == null || discovering) ? null : discoverDeviceServices,
+                onPressed: (connectedDevice == null || discovering)
+                    ? null
+                    : discoverDeviceServices,
                 child: Text(discovering ? 'Services...' : 'Discover services'),
               ),
             ],
@@ -315,25 +338,38 @@ class _HomePageState extends State<HomePage> {
           Expanded(
             child: ListView(
               children: [
-                if (devices.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(
+                    'Appareils trouvés',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                if (devices.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Appareils trouvés', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    child: Text('Aucun périphérique trouvé pour le moment'),
                   ),
-                  for (final result in devices)
-                    ListTile(
-                      title: Text(result.device.platformName.isEmpty ? 'Device inconnu' : result.device.platformName),
-                      subtitle: Text(result.device.remoteId.toString()),
-                      trailing: ElevatedButton(
-                        onPressed: () => connectToDevice(result.device),
-                        child: const Text('Connect'),
-                      ),
+                for (final result in devices)
+                  ListTile(
+                    title: Text(
+                      result.device.platformName.isEmpty
+                          ? 'Device inconnu'
+                          : result.device.platformName,
                     ),
-                ],
+                    subtitle: Text(result.device.remoteId.toString()),
+                    trailing: ElevatedButton(
+                      onPressed: () => connectToDevice(result.device),
+                      child: const Text('Connect'),
+                    ),
+                  ),
                 if (services.isNotEmpty) ...[
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Services BLE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    child: Text(
+                      'Services BLE',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                   ),
                   for (final s in services)
                     Card(
@@ -343,7 +379,10 @@ class _HomePageState extends State<HomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Service: ${s.uuid}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            Text(
+                              'Service: ${s.uuid}',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
                             const SizedBox(height: 8),
                             for (final c in s.characteristics)
                               Padding(

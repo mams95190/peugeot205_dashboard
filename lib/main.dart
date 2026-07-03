@@ -55,7 +55,7 @@ class _HomePageState extends State<HomePage> {
 
   void connectToDevice(BluetoothDevice device) async {
     try {
-      await device.connect(timeout: const Duration(seconds: 10));
+      await device.connect(license: License.personal, timeout: const Duration(seconds: 10));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Connecté à ${device.name}")),
       );

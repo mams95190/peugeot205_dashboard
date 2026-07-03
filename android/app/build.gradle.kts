@@ -5,13 +5,13 @@ plugins {
 
 android {
     namespace = "com.example.peugeot205_dashboard"
-    compileSdk = 34
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
         applicationId = "com.example.peugeot205_dashboard"
         minSdk = 21
-        targetSdk = 34
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

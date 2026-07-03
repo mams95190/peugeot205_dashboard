@@ -1,6 +1,11 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
 android {
     namespace = "com.example.peugeot205_dashboard"
-
     compileSdk = 36
 
     defaultConfig {
@@ -16,9 +21,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+flutter {
+    source = "../.."
 }

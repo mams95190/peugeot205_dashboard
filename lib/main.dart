@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -16,22 +17,20 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
-  StreamSubscription<BluetoothAdapterState>? _adapterStateSub;
+  StreamSubscription<BluetoothAdapterState>? _adapterSub;
 
   @override
   void initState() {
     super.initState();
-    _adapterStateSub = FlutterBluePlus.adapterState.listen((state) {
+    _adapterSub = FlutterBluePlus.adapterState.listen((s) {
       if (!mounted) return;
-      setState(() {
-        _adapterState = state;
-      });
+      setState(() => _adapterState = s);
     });
   }
 
   @override
   void dispose() {
-    _adapterStateSub?.cancel();
+    _adapterSub?.cancel();
     super.dispose();
   }
 
@@ -50,40 +49,33 @@ class _MyAppState extends State<MyApp> {
 
 class BluetoothOffPage extends StatelessWidget {
   final BluetoothAdapterState state;
-
   const BluetoothOffPage({super.key, required this.state});
 
   String get message {
     switch (state) {
       case BluetoothAdapterState.off:
-        return "Bluetooth désactivé";
+        return 'Bluetooth désactivé';
       case BluetoothAdapterState.unavailable:
-        return "Bluetooth indisponible";
+        return 'Bluetooth indisponible';
       case BluetoothAdapterState.unauthorized:
-        return "Bluetooth non autorisé";
+        return 'Bluetooth non autorisé';
       case BluetoothAdapterState.turningOn:
-        return "Activation du Bluetooth...";
+        return 'Activation du Bluetooth...';
       case BluetoothAdapterState.turningOff:
-        return "Désactivation du Bluetooth...";
+        return 'Désactivation du Bluetooth...';
       default:
-        return "Vérification du Bluetooth...";
+        return 'Vérification du Bluetooth...';
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("ESP32 BLE Dashboard"),
-      ),
+      appBar: AppBar(title: const Text('ESP32 BLE Dashboard')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 22),
-          ),
+          child: Text(message, textAlign: TextAlign.center, style: const TextStyle(fontSize: 22)),
         ),
       ),
     );
@@ -92,7 +84,6 @@ class BluetoothOffPage extends StatelessWidget {
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
-
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -104,8 +95,7 @@ class _HomePageState extends State<HomePage> {
   bool discovering = false;
 
   BluetoothDevice? connectedDevice;
-  BluetoothConnectionState connectionState =
-      BluetoothConnectionState.disconnected;
+  BluetoothConnectionState connectionState = BluetoothConnectionState.disconnected;
 
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
@@ -117,14 +107,32 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  Future<bool> _requestPermissions() async {
+    final statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+    return statuses.values.every((s) => s.isGranted || s.isLimited);
+  }
+
   Future<void> startScan() async {
+    final ok = await _requestPermissions();
+    if (!ok) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Permissions Bluetooth refusées')),
+      );
+      return;
+    }
+
     setState(() {
       devices.clear();
-      scanning = true;
-      discovering = false;
       services.clear();
       connectedDevice = null;
       connectionState = BluetoothConnectionState.disconnected;
+      scanning = true;
+      discovering = false;
     });
 
     await _scanSub?.cancel();
@@ -142,9 +150,7 @@ class _HomePageState extends State<HomePage> {
     await FlutterBluePlus.stopScan();
 
     if (!mounted) return;
-    setState(() {
-      scanning = false;
-    });
+    setState(() => scanning = false);
   }
 
   Future<void> connectToDevice(BluetoothDevice device) async {
@@ -154,9 +160,7 @@ class _HomePageState extends State<HomePage> {
       await _connSub?.cancel();
       _connSub = device.connectionState.listen((state) {
         if (!mounted) return;
-        setState(() {
-          connectionState = state;
-        });
+        setState(() => connectionState = state);
       });
 
       await device.connect(
@@ -168,17 +172,19 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() {
         connectedDevice = device;
+        services.clear();
       });
 
-      final name =
-          device.platformName.isEmpty ? "Device inconnu" : device.platformName;
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Connecté à $name")),
+        SnackBar(
+          content: Text(
+            'Connecté à ${device.platformName.isEmpty ? "Device inconnu" : device.platformName}',
+          ),
+        ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erreur connexion: $e")),
+        SnackBar(content: Text('Erreur connexion: $e')),
       );
     }
   }
@@ -186,9 +192,7 @@ class _HomePageState extends State<HomePage> {
   Future<void> disconnectDevice() async {
     try {
       if (connectedDevice == null) return;
-
       await connectedDevice!.disconnect();
-
       if (!mounted) return;
       setState(() {
         connectedDevice = null;
@@ -196,13 +200,9 @@ class _HomePageState extends State<HomePage> {
         discovering = false;
         services.clear();
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Déconnecté")),
-      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erreur déconnexion: $e")),
+        SnackBar(content: Text('Erreur déconnexion: $e')),
       );
     }
   }
@@ -226,21 +226,19 @@ class _HomePageState extends State<HomePage> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("${found.length} service(s) trouvé(s)")),
+        SnackBar(content: Text('${found.length} service(s) trouvé(s)')),
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        discovering = false;
-      });
+      setState(() => discovering = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erreur discoverServices: $e")),
+        SnackBar(content: Text('Erreur discoverServices: $e')),
       );
     }
   }
 
-  String bytesToText(List<int> bytes) {
-    if (bytes.isEmpty) return "(vide)";
+  String _bytesToText(List<int> bytes) {
+    if (bytes.isEmpty) return '(vide)';
     try {
       return utf8.decode(bytes, allowMalformed: true);
     } catch (_) {
@@ -253,14 +251,12 @@ class _HomePageState extends State<HomePage> {
       final value = await c.read();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Read ${c.uuid}: ${bytesToText(value)}"),
-        ),
+        SnackBar(content: Text('Read ${c.uuid}: ${_bytesToText(value)}')),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erreur read ${c.uuid}: $e")),
+        SnackBar(content: Text('Erreur read ${c.uuid}: $e')),
       );
     }
   }
@@ -268,14 +264,14 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final connectedName = connectedDevice == null
-        ? "Aucune"
+        ? 'Aucune'
         : (connectedDevice!.platformName.isEmpty
-            ? "Device inconnu"
+            ? 'Device inconnu'
             : connectedDevice!.platformName);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("ESP32 BLE Dashboard"),
+        title: const Text('ESP32 BLE Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -294,14 +290,9 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                Expanded(
-                  child: Text("Connecté : $connectedName"),
-                ),
+                Expanded(child: Text('Connecté : $connectedName')),
                 const SizedBox(width: 12),
-                Text(
-                  "État : ${connectionState.name}",
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+                Text('État : ${connectionState.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
               ],
             ),
           ),
@@ -311,14 +302,12 @@ class _HomePageState extends State<HomePage> {
             children: [
               ElevatedButton(
                 onPressed: scanning ? null : startScan,
-                child: Text(scanning ? "Scan..." : "Scanner Bluetooth"),
+                child: Text(scanning ? 'Scan...' : 'Scanner Bluetooth'),
               ),
               const SizedBox(width: 12),
               ElevatedButton(
-                onPressed: (connectedDevice == null || discovering)
-                    ? null
-                    : discoverDeviceServices,
-                child: Text(discovering ? "Services..." : "Discover services"),
+                onPressed: (connectedDevice == null || discovering) ? null : discoverDeviceServices,
+                child: Text(discovering ? 'Services...' : 'Discover services'),
               ),
             ],
           ),
@@ -329,62 +318,42 @@ class _HomePageState extends State<HomePage> {
                 if (devices.isNotEmpty) ...[
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text(
-                      "Appareils trouvés",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('Appareils trouvés', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
                   for (final result in devices)
                     ListTile(
-                      title: Text(
-                        result.device.platformName.isEmpty
-                            ? "Device inconnu"
-                            : result.device.platformName,
-                      ),
+                      title: Text(result.device.platformName.isEmpty ? 'Device inconnu' : result.device.platformName),
                       subtitle: Text(result.device.remoteId.toString()),
                       trailing: ElevatedButton(
                         onPressed: () => connectToDevice(result.device),
-                        child: const Text("Connect"),
+                        child: const Text('Connect'),
                       ),
                     ),
                 ],
                 if (services.isNotEmpty) ...[
                   const Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text(
-                      "Services BLE",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('Services BLE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
                   for (final s in services)
                     Card(
-                      margin: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
+                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              "Service: ${s.uuid}",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            Text('Service: ${s.uuid}', style: const TextStyle(fontWeight: FontWeight.bold)),
                             const SizedBox(height: 8),
                             for (final c in s.characteristics)
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
                                 child: Row(
                                   children: [
-                                    Expanded(
-                                      child: Text("Char: ${c.uuid}"),
-                                    ),
+                                    Expanded(child: Text('Char: ${c.uuid}')),
                                     ElevatedButton(
                                       onPressed: () => readCharacteristic(c),
-                                      child: const Text("Read"),
+                                      child: const Text('Read'),
                                     ),
                                   ],
                                 ),

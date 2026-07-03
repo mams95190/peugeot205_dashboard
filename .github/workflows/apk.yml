@@ -25,7 +25,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.0'
-          channel: 'stable'
+          channel: stable
           architecture: x64
           cache: false
 

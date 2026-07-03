@@ -201,7 +201,6 @@ class _HomePageState extends State<HomePage> {
       });
 
       await device.connect(
-        license: License.nonprofit,
         timeout: const Duration(seconds: 10),
         autoConnect: false,
       );

@@ -12,8 +12,8 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 const String bleDeviceName = 'Peugeot205-ESP32';
-const Guid serviceUuid = Guid('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
-const Guid characteristicUuid = Guid('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+final Guid serviceUuid = Guid.fromString('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+final Guid characteristicUuid = Guid.fromString('beb5483e-36e1-4688-b7f5-ea07361b26a8');
 
 Future<void> initNotifications() async {
   const AndroidInitializationSettings initAndroid =

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:home_widget/home_widget.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -47,6 +48,22 @@ Future<void> showTestNotification(String body) async {
     'Test notification',
     body,
     details,
+  );
+}
+
+Future<void> updateHomeScreenWidget(Map<String, dynamic> json) async {
+  final sim = json['sim'] == true || json['sim'] == 'true';
+  await HomeWidget.saveWidgetData<String>(
+      'mode', sim ? 'SIMULATION' : 'REEL');
+  await HomeWidget.saveWidgetData<String>(
+      'water', '${json['water'] ?? '--'} °C');
+  await HomeWidget.saveWidgetData<String>(
+      'oil', '${json['oil'] ?? '--'} °C');
+  await HomeWidget.saveWidgetData<String>(
+      'press', '${json['press'] ?? '--'} bar');
+
+  await HomeWidget.updateWidget(
+    androidName: 'Peugeot205WidgetProvider',
   );
 }
 
@@ -148,9 +165,10 @@ class _DashboardPageState extends State<DashboardPage> {
       status = 'Lecture OK';
     });
 
+    await updateHomeScreenWidget(json);
+
     final sim = json['sim'] == true || json['sim'] == 'true';
-    await showTestNotification(
-        'Lecture OK · sim=${sim ? "ON" : "OFF"}');
+    await showTestNotification('Lecture OK · sim=${sim ? "ON" : "OFF"}');
   }
 
   Future<void> _testNotificationButton() async {

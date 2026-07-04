@@ -12,7 +12,7 @@ void main() {
 
 final Guid kServiceUuid = Guid("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 final Guid kCharUuid = Guid("beb5483e-36e1-4688-b7f5-ea07361b26a8");
-const String kDeviceName = "Peugeot205-ESP32";
+const String kExpectedName = "Peugeot205-ESP32";
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -44,7 +44,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'ESP32 Dashboard',
+      title: 'ESP32 BLE Dashboard',
       theme: ThemeData.dark(),
       home: _adapterState == BluetoothAdapterState.on
           ? const HomePage()
@@ -106,6 +106,7 @@ class _HomePageState extends State<HomePage> {
   bool scanning = false;
   bool discovering = false;
   String permissionDebug = 'Pas encore testé';
+  String scanDebug = '';
 
   BluetoothDevice? connectedDevice;
   BluetoothConnectionState connectionState =
@@ -141,16 +142,12 @@ class _HomePageState extends State<HomePage> {
     permissionDebug =
         'scan=$scanStatus | connect=$connectStatus | location=$locationStatus';
 
-    if (mounted) {
-      setState(() {});
-    }
-
+    if (mounted) setState(() {});
     return scanStatus.isGranted && connectStatus.isGranted;
   }
 
   Future<void> startScan() async {
     final ok = await _requestPermissions();
-
     if (!ok) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -169,6 +166,7 @@ class _HomePageState extends State<HomePage> {
       jsonChar = null;
       liveJson = null;
       lastRawValue = '';
+      scanDebug = '';
     });
 
     await _scanSub?.cancel();
@@ -176,16 +174,35 @@ class _HomePageState extends State<HomePage> {
     _scanSub = FlutterBluePlus.onScanResults.listen((results) {
       if (!mounted) return;
 
-      final filtered = results.where((r) {
-        final n1 = r.device.platformName.trim();
-        final n2 = r.advertisementData.advName.trim();
-        return n1 == kDeviceName || n2 == kDeviceName;
+      final unique = <String, ScanResult>{};
+      for (final r in results) {
+        unique[r.device.remoteId.toString()] = r;
+      }
+
+      final sorted = unique.values.toList()
+        ..sort((a, b) => b.rssi.compareTo(a.rssi));
+
+      String debugLine = 'Trouvés: ${sorted.length}';
+      final maybe = sorted.where((r) {
+        final p = r.device.platformName.toLowerCase();
+        final a = r.advertisementData.advName.toLowerCase();
+        return p.contains('peugeot') ||
+            a.contains('peugeot') ||
+            p.contains('esp32') ||
+            a.contains('esp32') ||
+            p.contains('205') ||
+            a.contains('205');
       }).toList();
+
+      if (maybe.isNotEmpty) {
+        debugLine += ' | Possibles ESP32: ${maybe.length}';
+      }
 
       setState(() {
         devices
           ..clear()
-          ..addAll(filtered.isNotEmpty ? filtered : results);
+          ..addAll(sorted);
+        scanDebug = debugLine;
       });
     }, onError: (e) {
       if (!mounted) return;
@@ -195,7 +212,10 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 12),
+        androidScanMode: AndroidScanMode.lowLatency,
+      );
       await FlutterBluePlus.isScanning.where((v) => v == false).first;
     } catch (e) {
       if (!mounted) return;
@@ -265,12 +285,11 @@ class _HomePageState extends State<HomePage> {
       try {
         final first = await target.read();
         final txt = _bytesToText(first);
-        lastRawValue = txt;
-
         final decoded = jsonDecode(txt);
         if (decoded is Map<String, dynamic>) {
           liveJson = decoded;
         }
+        lastRawValue = txt;
       } catch (_) {}
 
       if (!mounted) return;
@@ -359,6 +378,27 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String _displayName(ScanResult r) {
+    final adv = r.advertisementData.advName.trim();
+    final plat = r.device.platformName.trim();
+
+    if (adv.isNotEmpty) return adv;
+    if (plat.isNotEmpty) return plat;
+    return 'Device inconnu';
+  }
+
+  String _subTitle(ScanResult r) {
+    final adv = r.advertisementData.advName.trim();
+    final plat = r.device.platformName.trim();
+    final mark = (_displayName(r).toLowerCase().contains('peugeot') ||
+            _displayName(r).toLowerCase().contains('esp32') ||
+            _displayName(r).toLowerCase().contains('205'))
+        ? '  <-- possible'
+        : '';
+
+    return 'id=${r.device.remoteId} | rssi=${r.rssi} | adv="$adv" | name="$plat"$mark';
+  }
+
   Future<void> readCharacteristic(BluetoothCharacteristic c) async {
     try {
       final value = await c.read();
@@ -406,10 +446,7 @@ class _HomePageState extends State<HomePage> {
             ],
             if (lastRawValue.isNotEmpty) ...[
               const SizedBox(height: 8),
-              const Text(
-                'Raw:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              const Text('Raw:', style: TextStyle(fontWeight: FontWeight.bold)),
               Text(lastRawValue),
             ],
           ],
@@ -468,6 +505,14 @@ class _HomePageState extends State<HomePage> {
               style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
             ),
           ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              'Scan: $scanDebug',
+              style: const TextStyle(fontSize: 12, color: Colors.lightBlueAccent),
+            ),
+          ),
           const SizedBox(height: 12),
           _jsonCard(),
           const SizedBox(height: 12),
@@ -494,7 +539,7 @@ class _HomePageState extends State<HomePage> {
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: Text(
-                    'Appareils trouvés',
+                    'Tous les périphériques BLE trouvés',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -505,14 +550,8 @@ class _HomePageState extends State<HomePage> {
                   ),
                 for (final result in devices)
                   ListTile(
-                    title: Text(
-                      result.device.platformName.isEmpty
-                          ? (result.advertisementData.advName.isEmpty
-                              ? 'Device inconnu'
-                              : result.advertisementData.advName)
-                          : result.device.platformName,
-                    ),
-                    subtitle: Text(result.device.remoteId.toString()),
+                    title: Text(_displayName(result)),
+                    subtitle: Text(_subTitle(result)),
                     trailing: ElevatedButton(
                       onPressed: () => connectToDevice(result.device),
                       child: const Text('Connect'),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -8,6 +9,13 @@ import 'package:permission_handler/permission_handler.dart';
 void main() {
   runApp(const MyApp());
 }
+
+// UUIDs ESP32 (NimBLE)
+const Guid kServiceUuid =
+    Guid("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+const Guid kCharUuid =
+    Guid("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+const String kDeviceName = "Peugeot205-ESP32";
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -106,6 +114,10 @@ class _HomePageState extends State<HomePage> {
   BluetoothConnectionState connectionState =
       BluetoothConnectionState.disconnected;
 
+  BluetoothCharacteristic? jsonChar;
+  StreamSubscription<List<int>>? _notifySub;
+  Map<String, dynamic>? liveJson;
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<BluetoothConnectionState>? _connSub;
 
@@ -113,6 +125,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _scanSub?.cancel();
     _connSub?.cancel();
+    _notifySub?.cancel();
     super.dispose();
   }
 
@@ -147,7 +160,10 @@ class _HomePageState extends State<HomePage> {
     if (!ok) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Permissions Bluetooth refusées: $permissionDebug')),
+        SnackBar(
+          content: Text(
+              'Permissions Bluetooth refusées: $permissionDebug'),
+        ),
       );
       return;
     }
@@ -159,22 +175,41 @@ class _HomePageState extends State<HomePage> {
       connectionState = BluetoothConnectionState.disconnected;
       scanning = true;
       discovering = false;
+      jsonChar = null;
+      liveJson = null;
     });
 
     await _scanSub?.cancel();
-    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+    _scanSub = FlutterBluePlus.onScanResults.listen((results) {
       if (!mounted) return;
+
+      // On filtre d’abord par nom, sinon on garde tout
+      final filtered = results.where((r) {
+        final name = r.device.platformName;
+        final adv = r.advertisementData.advName;
+        return name == kDeviceName || adv == kDeviceName;
+      }).toList();
+
       setState(() {
         devices
           ..clear()
-          ..addAll(results);
+          ..addAll(filtered.isNotEmpty ? filtered : results);
       });
+    }, onError: (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur flux scan: $e')),
+      );
     });
 
     try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
-      await Future.delayed(const Duration(seconds: 8));
-      await FlutterBluePlus.stopScan();
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 8),
+      );
+      // On attend la fin du scan
+      await FlutterBluePlus.isScanning
+          .where((v) => v == false)
+          .first;
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -186,7 +221,9 @@ class _HomePageState extends State<HomePage> {
     setState(() => scanning = false);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${devices.length} périphérique(s) trouvé(s)')),
+      SnackBar(
+          content:
+              Text('${devices.length} périphérique(s) trouvé(s)')),
     );
   }
 
@@ -205,10 +242,67 @@ class _HomePageState extends State<HomePage> {
         autoConnect: false,
       );
 
+      // Découverte des services
+      final found = await device.discoverServices();
+
+      BluetoothCharacteristic? target;
+      for (final s in found) {
+        if (s.uuid == kServiceUuid) {
+          for (final c in s.characteristics) {
+            if (c.uuid == kCharUuid) {
+              target = c;
+              break;
+            }
+          }
+        }
+      }
+
+      if (target == null) {
+        throw Exception(
+            "Caractéristique JSON introuvable sur l'ESP32");
+      }
+
+      // Abonnement aux notifications (CCCD)
+      await _notifySub?.cancel();
+      _notifySub = target.onValueReceived.listen((value) {
+        final txt = _bytesToText(value);
+        try {
+          final decoded =
+              jsonDecode(txt) as Map<String, dynamic>;
+          if (!mounted) return;
+          setState(() {
+            liveJson = decoded;
+          });
+        } catch (_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('JSON invalide reçu: $txt')),
+          );
+        }
+      });
+
+      await target.setNotifyValue(true);
+
+      // Lecture initiale
+      try {
+        final first = await target.read();
+        final txt = _bytesToText(first);
+        final decoded =
+            jsonDecode(txt) as Map<String, dynamic>;
+        liveJson = decoded;
+      } catch (_) {
+        // silencieux : la première read peut ne contenir que {"boot":true}
+      }
+
       if (!mounted) return;
       setState(() {
         connectedDevice = device;
-        services.clear();
+        services
+          ..clear()
+          ..addAll(found);
+        jsonChar = target;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -219,6 +313,7 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur connexion: $e')),
       );
@@ -227,6 +322,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> disconnectDevice() async {
     try {
+      await _notifySub?.cancel();
+      _notifySub = null;
+
       if (connectedDevice == null) return;
 
       await connectedDevice!.disconnect();
@@ -237,12 +335,15 @@ class _HomePageState extends State<HomePage> {
         connectionState = BluetoothConnectionState.disconnected;
         discovering = false;
         services.clear();
+        jsonChar = null;
+        liveJson = null;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Déconnecté')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erreur déconnexion: $e')),
       );
@@ -274,7 +375,8 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() => discovering = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur discoverServices: $e')),
+        SnackBar(
+            content: Text('Erreur discoverServices: $e')),
       );
     }
   }
@@ -284,7 +386,9 @@ class _HomePageState extends State<HomePage> {
     try {
       return utf8.decode(bytes, allowMalformed: true);
     } catch (_) {
-      return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+      return bytes
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join(' ');
     }
   }
 
@@ -293,12 +397,16 @@ class _HomePageState extends State<HomePage> {
       final value = await c.read();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Read ${c.uuid}: ${_bytesToText(value)}')),
+        SnackBar(
+          content: Text(
+              'Read ${c.uuid}: ${_bytesToText(value)}'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur read ${c.uuid}: $e')),
+        SnackBar(
+            content: Text('Erreur read ${c.uuid}: $e')),
       );
     }
   }
@@ -329,7 +437,8 @@ class _HomePageState extends State<HomePage> {
           ),
           IconButton(
             icon: const Icon(Icons.link_off),
-            onPressed: connectedDevice == null ? null : disconnectDevice,
+            onPressed:
+                connectedDevice == null ? null : disconnectDevice,
           ),
         ],
       ),
@@ -340,11 +449,13 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                Expanded(child: Text('Connecté : $connectedName')),
+                Expanded(
+                    child: Text('Connecté : $connectedName')),
                 const SizedBox(width: 12),
                 Text(
                   'État : ${connectionState.name}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style:
+                      const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -354,23 +465,67 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
               'Permissions: $permissionDebug',
-              style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
+              style: const TextStyle(
+                  fontSize: 12, color: Colors.orangeAccent),
             ),
           ),
+          const SizedBox(height: 12),
+
+          // Carte JSON live
+          if (liveJson != null)
+            Card(
+              margin:
+                  const EdgeInsets.symmetric(horizontal: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Données ESP32 (BLE JSON)',
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                        'Water: ${liveJson!["water"]} °C'),
+                    Text(
+                        'Oil: ${liveJson!["oil"]} °C'),
+                    Text(
+                        'Press: ${liveJson!["press"]} bar'),
+                    Text(
+                        'Water status: ${liveJson!["waterStatus"]}'),
+                    Text(
+                        'Oil status: ${liveJson!["oilStatus"]}'),
+                    Text(
+                        'Press status: ${liveJson!["pressStatus"]}'),
+                    Text(
+                        'Simulation: ${liveJson!["sim"]}'),
+                  ],
+                ),
+              ),
+            ),
+
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               ElevatedButton(
                 onPressed: scanning ? null : startScan,
-                child: Text(scanning ? 'Scan...' : 'Scanner Bluetooth'),
+                child:
+                    Text(scanning ? 'Scan...' : 'Scanner Bluetooth'),
               ),
               const SizedBox(width: 12),
               ElevatedButton(
-                onPressed: (connectedDevice == null || discovering)
-                    ? null
-                    : discoverDeviceServices,
-                child: Text(discovering ? 'Services...' : 'Discover services'),
+                onPressed:
+                    (connectedDevice == null || discovering)
+                        ? null
+                        : discoverDeviceServices,
+                child: Text(discovering
+                    ? 'Services...'
+                    : 'Discover services'),
               ),
             ],
           ),
@@ -379,16 +534,21 @@ class _HomePageState extends State<HomePage> {
             child: ListView(
               children: [
                 const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
                   child: Text(
                     'Appareils trouvés',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
                 if (devices.isEmpty)
                   const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Aucun périphérique trouvé pour le moment'),
+                    padding: EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: Text(
+                        'Aucun périphérique trouvé pour le moment'),
                   ),
                 for (final result in devices)
                   ListTile(
@@ -397,41 +557,54 @@ class _HomePageState extends State<HomePage> {
                           ? 'Device inconnu'
                           : result.device.platformName,
                     ),
-                    subtitle: Text(result.device.remoteId.toString()),
+                    subtitle:
+                        Text(result.device.remoteId.toString()),
                     trailing: ElevatedButton(
-                      onPressed: () => connectToDevice(result.device),
+                      onPressed: () =>
+                          connectToDevice(result.device),
                       child: const Text('Connect'),
                     ),
                   ),
                 if (services.isNotEmpty) ...[
                   const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
                     child: Text(
                       'Services BLE',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold),
                     ),
                   ),
                   for (final s in services)
                     Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       child: Padding(
                         padding: const EdgeInsets.all(12),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
                           children: [
                             Text(
                               'Service: ${s.uuid}',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 8),
                             for (final c in s.characteristics)
                               Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.only(
+                                    bottom: 8),
                                 child: Row(
                                   children: [
-                                    Expanded(child: Text('Char: ${c.uuid}')),
+                                    Expanded(
+                                      child: Text(
+                                          'Char: ${c.uuid}'),
+                                    ),
                                     ElevatedButton(
-                                      onPressed: () => readCharacteristic(c),
+                                      onPressed: () =>
+                                          readCharacteristic(c),
                                       child: const Text('Read'),
                                     ),
                                   ],

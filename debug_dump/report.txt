@@ -1,0 +1,458 @@
+===== GIT STATUS =====
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	debug_dump/
+
+nothing added to commit but untracked files present (use "git add" to track)
+
+===== LAST 15 COMMITS =====
+44b4d3a set gradle android properties
+31d7b42 hardcode compile sdk and ndk for android build
+690b20b use flutter sdk values in android app gradle
+8c4de60 add required flutter blue plus license parameter
+125f46c force CI to regenerate dependencies
+810cc6f stop tracking stale lockfile
+c50840e remove invalid sha placeholder from lockfile
+6efdeb5 force lockfile off old flutter_blue_plus
+1e5f6eb use flutter_blue_plus 2.3.10 and remove license param
+926a16e pin flutter blue plus platform packages
+9190606 downgrade flutter_blue_plus for flutter 3.24 compatibility
+265d413 replace deprecated bluetooth license enum
+06c3d03 add required license parameter to bluetooth connect
+6f05ac4 upgrade flutter_blue_plus to latest
+fb42790 fix kotlin plugin and jvm target config
+
+===== PUBSPEC =====
+name: peugeot205_dashboard
+description: A new Flutter project.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_blue_plus: 2.3.10
+  permission_handler: ^11.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+===== PUBSPEC LOCK =====
+pubspec.lock absent
+
+===== MAIN DART =====
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+  StreamSubscription<BluetoothAdapterState>? _adapterSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _adapterSub = FlutterBluePlus.adapterState.listen((s) {
+      if (!mounted) return;
+      setState(() => _adapterState = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _adapterSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'ESP32 Dashboard',
+      theme: ThemeData.dark(),
+      home: _adapterState == BluetoothAdapterState.on
+          ? const HomePage()
+          : BluetoothOffPage(state: _adapterState),
+    );
+  }
+}
+
+class BluetoothOffPage extends StatelessWidget {
+  final BluetoothAdapterState state;
+  const BluetoothOffPage({super.key, required this.state});
+
+  String get message {
+    switch (state) {
+      case BluetoothAdapterState.off:
+        return 'Bluetooth désactivé';
+      case BluetoothAdapterState.unavailable:
+        return 'Bluetooth indisponible';
+      case BluetoothAdapterState.unauthorized:
+        return 'Bluetooth non autorisé';
+      case BluetoothAdapterState.turningOn:
+        return 'Activation du Bluetooth...';
+      case BluetoothAdapterState.turningOff:
+        return 'Désactivation du Bluetooth...';
+      default:
+        return 'Vérification du Bluetooth...';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('ESP32 BLE Dashboard')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final List<ScanResult> devices = [];
+  final List<BluetoothService> services = [];
+
+  bool scanning = false;
+  bool discovering = false;
+  String permissionDebug = 'Pas encore testé';
+
+  BluetoothDevice? connectedDevice;
+  BluetoothConnectionState connectionState =
+      BluetoothConnectionState.disconnected;
+
+  StreamSubscription<List<ScanResult>>? _scanSub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
+
+  @override
+  void dispose() {
+    _scanSub?.cancel();
+    _connSub?.cancel();
+    super.dispose();
+  }
+
+  Future<bool> _requestPermissions() async {
+    if (!Platform.isAndroid) {
+      return true;
+    }
+
+    final scanStatus = await Permission.bluetoothScan.request();
+    final connectStatus = await Permission.bluetoothConnect.request();
+
+    PermissionStatus locationStatus = PermissionStatus.granted;
+    try {
+      locationStatus = await Permission.locationWhenInUse.request();
+    } catch (_) {}
+
+    final ok = scanStatus.isGranted && connectStatus.isGranted;
+
+    permissionDebug =
+        'scan=$scanStatus | connect=$connectStatus | location=$locationStatus';
+
+    if (mounted) {
+      setState(() {});
+    }
+
+    return ok;
+  }
+
+  Future<void> startScan() async {
+    final ok = await _requestPermissions();
+
+    if (!ok) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Permissions Bluetooth refusées: $permissionDebug')),
+      );
+      return;
+    }
+
+    setState(() {
+      devices.clear();
+      services.clear();
+      connectedDevice = null;
+      connectionState = BluetoothConnectionState.disconnected;
+      scanning = true;
+      discovering = false;
+    });
+
+    await _scanSub?.cancel();
+    _scanSub = FlutterBluePlus.scanResults.listen((results) {
+      if (!mounted) return;
+      setState(() {
+        devices
+          ..clear()
+          ..addAll(results);
+      });
+    });
+
+    try {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+      await Future.delayed(const Duration(seconds: 8));
+      await FlutterBluePlus.stopScan();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur scan: $e')),
+      );
+    }
+
+    if (!mounted) return;
+    setState(() => scanning = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${devices.length} périphérique(s) trouvé(s)')),
+    );
+  }
+
+  Future<void> connectToDevice(BluetoothDevice device) async {
+    try {
+      await FlutterBluePlus.stopScan();
+
+      await _connSub?.cancel();
+      _connSub = device.connectionState.listen((state) {
+        if (!mounted) return;
+        setState(() => connectionState = state);
+      });
+
+      await device.connect(
+        license: License.nonprofit,
+        timeout: const Duration(seconds: 10),
+        autoConnect: false,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        connectedDevice = device;
+        services.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Connecté à ${device.platformName.isEmpty ? "Device inconnu" : device.platformName}',
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur connexion: $e')),
+      );
+    }
+  }
+
+  Future<void> disconnectDevice() async {
+    try {
+      if (connectedDevice == null) return;
+
+      await connectedDevice!.disconnect();
+
+      if (!mounted) return;
+      setState(() {
+        connectedDevice = null;
+        connectionState = BluetoothConnectionState.disconnected;
+        discovering = false;
+        services.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Déconnecté')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur déconnexion: $e')),
+      );
+    }
+  }
+
+  Future<void> discoverDeviceServices() async {
+    final device = connectedDevice;
+    if (device == null) return;
+
+    try {
+      setState(() {
+        discovering = true;
+        services.clear();
+
+===== ANDROID SETTINGS.GRADLE.KTS =====
+pluginManagement {
+    val flutterSdkPath =
+        run {
+            val properties = java.util.Properties()
+            file("local.properties").inputStream().use { properties.load(it) }
+            val flutterSdkPath = properties.getProperty("flutter.sdk")
+            require(flutterSdkPath != null) { "flutter.sdk not set in local.properties" }
+            flutterSdkPath
+        }
+
+    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "8.6.0" apply false
+    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+}
+
+include(":app")
+
+===== ANDROID APP BUILD.GRADLE.KTS =====
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
+
+android {
+    namespace = "com.example.peugeot205_dashboard"
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
+
+    defaultConfig {
+        applicationId = "com.example.peugeot205_dashboard"
+        minSdk = 21
+        targetSdk = 36
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+===== ANDROID GRADLE.PROPERTIES =====
+org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=2G -XX:+HeapDumpOnOutOfMemoryError
+android.useAndroidX=true
+android.enableJetifier=true
+android.suppressUnsupportedCompileSdk=36
+
+===== GRADLE WRAPPER =====
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.7-bin.zip
+
+===== GITHUB ACTION =====
+name: Build APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Remove stale lockfile
+        run: rm -f pubspec.lock
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: stable
+          architecture: x64
+          cache: false
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze lib/main.dart --no-fatal-infos
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+===== SEARCH FLUTTER BLUE PLUS =====
+lib/main.dart:5:import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+lib/main.dart:198:      _connSub = device.connectionState.listen((state) {
+lib/main.dart:203:      await device.connect(
+lib/main.dart:204:        license: License.nonprofit,
+android/gradle.properties:4:android.suppressUnsupportedCompileSdk=36
+android/app/build.gradle.kts:9:    compileSdk = 36
+android/app/build.gradle.kts:15:        targetSdk = 36
+pubspec.yaml:13:  flutter_blue_plus: 2.3.10
+

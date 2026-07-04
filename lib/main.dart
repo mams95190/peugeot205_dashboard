@@ -12,7 +12,6 @@ void main() {
 
 final Guid kServiceUuid = Guid("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 final Guid kCharUuid = Guid("beb5483e-36e1-4688-b7f5-ea07361b26a8");
-const String kExpectedName = "Peugeot205-ESP32";
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -44,7 +43,6 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'ESP32 BLE Dashboard',
       theme: ThemeData.dark(),
       home: _adapterState == BluetoothAdapterState.on
           ? const HomePage()
@@ -57,35 +55,14 @@ class BluetoothOffPage extends StatelessWidget {
   final BluetoothAdapterState state;
   const BluetoothOffPage({super.key, required this.state});
 
-  String get message {
-    switch (state) {
-      case BluetoothAdapterState.off:
-        return 'Bluetooth désactivé';
-      case BluetoothAdapterState.unavailable:
-        return 'Bluetooth indisponible';
-      case BluetoothAdapterState.unauthorized:
-        return 'Bluetooth non autorisé';
-      case BluetoothAdapterState.turningOn:
-        return 'Activation du Bluetooth...';
-      case BluetoothAdapterState.turningOff:
-        return 'Désactivation du Bluetooth...';
-      default:
-        return 'Vérification du Bluetooth...';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('ESP32 BLE Dashboard')),
       body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 22),
-          ),
+        child: Text(
+          'Bluetooth: ${state.name}',
+          style: const TextStyle(fontSize: 22),
         ),
       ),
     );
@@ -105,8 +82,11 @@ class _HomePageState extends State<HomePage> {
 
   bool scanning = false;
   bool discovering = false;
-  String permissionDebug = 'Pas encore testé';
+
+  String permissionDebug = '';
   String scanDebug = '';
+  String serviceDebug = '';
+  String lastRawValue = '';
 
   BluetoothDevice? connectedDevice;
   BluetoothConnectionState connectionState =
@@ -118,7 +98,6 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<BluetoothConnectionState>? _connSub;
 
   Map<String, dynamic>? liveJson;
-  String lastRawValue = '';
 
   @override
   void dispose() {
@@ -148,25 +127,19 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> startScan() async {
     final ok = await _requestPermissions();
-    if (!ok) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Permissions refusées: $permissionDebug')),
-      );
-      return;
-    }
+    if (!ok) return;
 
     setState(() {
       devices.clear();
       services.clear();
+      scanDebug = '';
+      serviceDebug = '';
       scanning = true;
-      discovering = false;
       connectedDevice = null;
       connectionState = BluetoothConnectionState.disconnected;
       jsonChar = null;
       liveJson = null;
       lastRawValue = '';
-      scanDebug = '';
     });
 
     await _scanSub?.cancel();
@@ -182,33 +155,12 @@ class _HomePageState extends State<HomePage> {
       final sorted = unique.values.toList()
         ..sort((a, b) => b.rssi.compareTo(a.rssi));
 
-      String debugLine = 'Trouvés: ${sorted.length}';
-      final maybe = sorted.where((r) {
-        final p = r.device.platformName.toLowerCase();
-        final a = r.advertisementData.advName.toLowerCase();
-        return p.contains('peugeot') ||
-            a.contains('peugeot') ||
-            p.contains('esp32') ||
-            a.contains('esp32') ||
-            p.contains('205') ||
-            a.contains('205');
-      }).toList();
-
-      if (maybe.isNotEmpty) {
-        debugLine += ' | Possibles ESP32: ${maybe.length}';
-      }
-
       setState(() {
         devices
           ..clear()
           ..addAll(sorted);
-        scanDebug = debugLine;
+        scanDebug = 'BLE trouvés: ${sorted.length}';
       });
-    }, onError: (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur scan stream: $e')),
-      );
     });
 
     try {
@@ -218,10 +170,7 @@ class _HomePageState extends State<HomePage> {
       );
       await FlutterBluePlus.isScanning.where((v) => v == false).first;
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur scan: $e')),
-      );
+      scanDebug = 'Erreur scan: $e';
     }
 
     if (!mounted) return;
@@ -246,6 +195,8 @@ class _HomePageState extends State<HomePage> {
 
       final found = await device.discoverServices();
 
+      final uuids = found.map((s) => s.uuid.toString()).join('\n');
+
       BluetoothCharacteristic? target;
       for (final s in found) {
         if (s.uuid == kServiceUuid) {
@@ -258,39 +209,37 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      if (target == null) {
-        throw Exception('Caractéristique JSON introuvable');
-      }
+      if (target != null) {
+        _notifySub = target.onValueReceived.listen((value) {
+          final txt = _bytesToText(value);
+          if (!mounted) return;
 
-      _notifySub = target.onValueReceived.listen((value) {
-        final txt = _bytesToText(value);
-        if (!mounted) return;
+          setState(() {
+            lastRawValue = txt;
+          });
 
-        setState(() {
-          lastRawValue = txt;
+          try {
+            final decoded = jsonDecode(txt);
+            if (decoded is Map<String, dynamic>) {
+              setState(() {
+                liveJson = decoded;
+              });
+            }
+          } catch (_) {}
         });
 
+        await target.setNotifyValue(true);
+
         try {
+          final first = await target.read();
+          final txt = _bytesToText(first);
+          lastRawValue = txt;
           final decoded = jsonDecode(txt);
           if (decoded is Map<String, dynamic>) {
-            setState(() {
-              liveJson = decoded;
-            });
+            liveJson = decoded;
           }
         } catch (_) {}
-      });
-
-      await target.setNotifyValue(true);
-
-      try {
-        final first = await target.read();
-        final txt = _bytesToText(first);
-        final decoded = jsonDecode(txt);
-        if (decoded is Map<String, dynamic>) {
-          liveJson = decoded;
-        }
-        lastRawValue = txt;
-      } catch (_) {}
+      }
 
       if (!mounted) return;
       setState(() {
@@ -299,20 +248,13 @@ class _HomePageState extends State<HomePage> {
           ..clear()
           ..addAll(found);
         jsonChar = target;
+        serviceDebug = uuids.isEmpty ? 'Aucun service' : uuids;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Connecté à ${device.platformName.isEmpty ? "Device inconnu" : device.platformName}',
-          ),
-        ),
-      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur connexion: $e')),
-      );
+      setState(() {
+        serviceDebug = 'Erreur connexion/services: $e';
+      });
     }
   }
 
@@ -334,39 +276,9 @@ class _HomePageState extends State<HomePage> {
         jsonChar = null;
         liveJson = null;
         lastRawValue = '';
+        serviceDebug = '';
       });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur déconnexion: $e')),
-      );
-    }
-  }
-
-  Future<void> discoverDeviceServices() async {
-    final device = connectedDevice;
-    if (device == null) return;
-
-    try {
-      setState(() {
-        discovering = true;
-        services.clear();
-      });
-
-      final found = await device.discoverServices();
-
-      if (!mounted) return;
-      setState(() {
-        services.addAll(found);
-        discovering = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => discovering = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur discoverServices: $e')),
-      );
-    }
+    } catch (_) {}
   }
 
   String _bytesToText(List<int> bytes) {
@@ -381,41 +293,13 @@ class _HomePageState extends State<HomePage> {
   String _displayName(ScanResult r) {
     final adv = r.advertisementData.advName.trim();
     final plat = r.device.platformName.trim();
-
     if (adv.isNotEmpty) return adv;
     if (plat.isNotEmpty) return plat;
     return 'Device inconnu';
   }
 
-  String _subTitle(ScanResult r) {
-    final adv = r.advertisementData.advName.trim();
-    final plat = r.device.platformName.trim();
-    final mark = (_displayName(r).toLowerCase().contains('peugeot') ||
-            _displayName(r).toLowerCase().contains('esp32') ||
-            _displayName(r).toLowerCase().contains('205'))
-        ? '  <-- possible'
-        : '';
-
-    return 'id=${r.device.remoteId} | rssi=${r.rssi} | adv="$adv" | name="$plat"$mark';
-  }
-
-  Future<void> readCharacteristic(BluetoothCharacteristic c) async {
-    try {
-      final value = await c.read();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_bytesToText(value))),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur read: $e')),
-      );
-    }
-  }
-
-  Future<void> openPermissions() async {
-    await openAppSettings();
+  String _subtitle(ScanResult r) {
+    return 'id=${r.device.remoteId} | rssi=${r.rssi} | adv="${r.advertisementData.advName}" | name="${r.device.platformName}"';
   }
 
   Widget _jsonCard() {
@@ -430,15 +314,12 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'BLE JSON',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
+            const Text('BLE JSON', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             if (liveJson != null) ...[
-              Text('Water: ${liveJson!["water"] ?? "-"} °C'),
-              Text('Oil: ${liveJson!["oil"] ?? "-"} °C'),
-              Text('Press: ${liveJson!["press"] ?? "-"} bar'),
+              Text('Water: ${liveJson!["water"] ?? "-"}'),
+              Text('Oil: ${liveJson!["oil"] ?? "-"}'),
+              Text('Press: ${liveJson!["press"] ?? "-"}'),
               Text('Water status: ${liveJson!["waterStatus"] ?? "-"}'),
               Text('Oil status: ${liveJson!["oilStatus"] ?? "-"}'),
               Text('Press status: ${liveJson!["pressStatus"] ?? "-"}'),
@@ -446,9 +327,8 @@ class _HomePageState extends State<HomePage> {
             ],
             if (lastRawValue.isNotEmpty) ...[
               const SizedBox(height: 8),
-              const Text('Raw:', style: TextStyle(fontWeight: FontWeight.bold)),
               Text(lastRawValue),
-            ],
+            ]
           ],
         ),
       ),
@@ -460,7 +340,7 @@ class _HomePageState extends State<HomePage> {
     final connectedName = connectedDevice == null
         ? 'Aucune'
         : (connectedDevice!.platformName.isEmpty
-            ? 'Device inconnu'
+            ? connectedDevice!.remoteId.toString()
             : connectedDevice!.platformName);
 
     return Scaffold(
@@ -472,10 +352,6 @@ class _HomePageState extends State<HomePage> {
             onPressed: scanning ? null : startScan,
           ),
           IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: openPermissions,
-          ),
-          IconButton(
             icon: const Icon(Icons.link_off),
             onPressed: connectedDevice == null ? null : disconnectDevice,
           ),
@@ -483,122 +359,52 @@ class _HomePageState extends State<HomePage> {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Expanded(child: Text('Connecté : $connectedName')),
-                const SizedBox(width: 12),
-                Text(
-                  'État : ${connectionState.name}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Permissions: $permissionDebug',
-              style: const TextStyle(fontSize: 12, color: Colors.orangeAccent),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('Permissions: $permissionDebug'),
           ),
-          const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Scan: $scanDebug',
-              style: const TextStyle(fontSize: 12, color: Colors.lightBlueAccent),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('Scan: $scanDebug'),
           ),
-          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text('Connecté: $connectedName | ${connectionState.name}'),
+          ),
+          const SizedBox(height: 8),
           _jsonCard(),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              ElevatedButton(
-                onPressed: scanning ? null : startScan,
-                child: Text(scanning ? 'Scan...' : 'Scanner Bluetooth'),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: (connectedDevice == null || discovering)
-                    ? null
-                    : discoverDeviceServices,
-                child: Text(discovering ? 'Services...' : 'Discover services'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Text(
-                    'Tous les périphériques BLE trouvés',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          if (serviceDebug.isNotEmpty)
+            Expanded(
+              child: Card(
+                margin: const EdgeInsets.all(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      'Services découverts:\n$serviceDebug',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
                 ),
-                if (devices.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text('Aucun périphérique trouvé'),
-                  ),
-                for (final result in devices)
-                  ListTile(
-                    title: Text(_displayName(result)),
-                    subtitle: Text(_subTitle(result)),
-                    trailing: ElevatedButton(
-                      onPressed: () => connectToDevice(result.device),
-                      child: const Text('Connect'),
-                    ),
-                  ),
-                if (services.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Text(
-                      'Services BLE',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  for (final s in services)
-                    Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Service: ${s.uuid}',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 8),
-                            for (final c in s.characteristics)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Row(
-                                  children: [
-                                    Expanded(child: Text('Char: ${c.uuid}')),
-                                    ElevatedButton(
-                                      onPressed: () => readCharacteristic(c),
-                                      child: const Text('Read'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                          ],
-                        ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final r in devices)
+                    ListTile(
+                      title: Text(_displayName(r)),
+                      subtitle: Text(_subtitle(r)),
+                      trailing: ElevatedButton(
+                        onPressed: () => connectToDevice(r.device),
+                        child: const Text('Connect'),
                       ),
                     ),
                 ],
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );

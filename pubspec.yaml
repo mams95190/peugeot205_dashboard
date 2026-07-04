@@ -11,7 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  flutter_blue_plus: ^1.35.5
+  flutter_blue_plus: 1.32.8
   permission_handler: ^11.3.1
   flutter_local_notifications: ^17.2.2
 

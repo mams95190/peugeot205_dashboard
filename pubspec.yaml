@@ -11,7 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  flutter_blue_plus: 1.32.8
+  flutter_blue_plus: ^1.35.5
   permission_handler: ^11.3.1
   flutter_local_notifications: ^17.2.2
   home_widget: ^0.7.0
@@ -28,8 +28,9 @@ flutter:
     - assets/icon/app_icon.png
 
 flutter_launcher_icons:
-  android: "launcher_icon"
+  android: true
   ios: false
   image_path: "assets/icon/app_icon.png"
   adaptive_icon_foreground: "assets/icon/app_icon.png"
   adaptive_icon_background: "#111111"
+  min_sdk_android: 21

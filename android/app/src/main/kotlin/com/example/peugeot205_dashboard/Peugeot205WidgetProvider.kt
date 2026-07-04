@@ -25,10 +25,10 @@ internal fun updateAppWidget(
     appWidgetId: Int
 ) {
     val prefs = HomeWidgetPlugin.getData(context)
-    val water = prefs.getString("water", "-- °C")
-    val oil = prefs.getString("oil", "-- °C")
-    val press = prefs.getString("press", "-- bar")
-    val mode = prefs.getString("mode", "REEL")
+    val water = prefs.getString("water", "Eau: -- °C")
+    val oil = prefs.getString("oil", "Huile: -- °C")
+    val press = prefs.getString("press", "Pression: -- bar")
+    val mode = prefs.getString("mode", "Mode: REEL")
     val waterColor = prefs.getString("waterColor", "#55BDE8") ?: "#55BDE8"
     val oilColor = prefs.getString("oilColor", "#D7A33F") ?: "#D7A33F"
     val pressColor = prefs.getString("pressColor", "#FF8A00") ?: "#FF8A00"

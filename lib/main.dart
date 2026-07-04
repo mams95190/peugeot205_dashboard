@@ -6,13 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 const String bleDeviceName = 'Peugeot205-ESP32';
-const String serviceUuid = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
-const String characteristicUuid = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+const Guid serviceUuid = Guid('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
+const Guid characteristicUuid = Guid('beb5483e-36e1-4688-b7f5-ea07361b26a8');
 
 Future<void> initNotifications() async {
   const AndroidInitializationSettings initAndroid =
@@ -24,9 +25,9 @@ Future<void> initNotifications() async {
   await flutterLocalNotificationsPlugin.initialize(initSettings);
 
   const AndroidNotificationChannel channel = AndroidNotificationChannel(
-    'peugeot205_channel',
-    'Peugeot 205',
-    description: 'Notifications Peugeot 205',
+    'peugeot205_alerts',
+    'Alertes température Peugeot 205',
+    description: 'Alertes locales sur températures eau et huile',
     importance: Importance.max,
   );
 
@@ -34,14 +35,16 @@ Future<void> initNotifications() async {
       .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
+
+  await Permission.notification.request();
 }
 
-Future<void> showInfoNotification(String body) async {
+Future<void> showAlertNotification(String title, String body) async {
   const AndroidNotificationDetails androidDetails =
       AndroidNotificationDetails(
-    'peugeot205_channel',
-    'Peugeot 205',
-    channelDescription: 'Notifications Peugeot 205',
+    'peugeot205_alerts',
+    'Alertes température Peugeot 205',
+    channelDescription: 'Alertes locales sur températures eau et huile',
     importance: Importance.max,
     priority: Priority.high,
   );
@@ -50,8 +53,8 @@ Future<void> showInfoNotification(String body) async {
       NotificationDetails(android: androidDetails);
 
   await flutterLocalNotificationsPlugin.show(
-    1,
-    'Peugeot 205',
+    DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    title,
     body,
     details,
   );
@@ -73,7 +76,7 @@ Color pressureColor(num value) {
 }
 
 String colorToHex(Color c) =>
-    '#${c.value.toRadixString(16).substring(2).toUpperCase()}';
+    '#${c.value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';
 
 Future<void> updateHomeScreenWidget(Map<String, dynamic> json) async {
   final water = (json['water'] ?? '--').toString();
@@ -86,10 +89,10 @@ Future<void> updateHomeScreenWidget(Map<String, dynamic> json) async {
   final pressNum = num.tryParse(press) ?? 0;
 
   await HomeWidget.saveWidgetData<String>(
-      'mode', sim ? 'SIMULATION' : 'REEL');
-  await HomeWidget.saveWidgetData<String>('water', '$water °C');
-  await HomeWidget.saveWidgetData<String>('oil', '$oil °C');
-  await HomeWidget.saveWidgetData<String>('press', '$press bar');
+      'mode', sim ? 'Mode: SIMULATION' : 'Mode: REEL');
+  await HomeWidget.saveWidgetData<String>('water', 'Eau: $water °C');
+  await HomeWidget.saveWidgetData<String>('oil', 'Huile: $oil °C');
+  await HomeWidget.saveWidgetData<String>('press', 'Pression: $press bar');
   await HomeWidget.saveWidgetData<String>(
       'waterColor', colorToHex(tempColor(waterNum)));
   await HomeWidget.saveWidgetData<String>(
@@ -97,9 +100,7 @@ Future<void> updateHomeScreenWidget(Map<String, dynamic> json) async {
   await HomeWidget.saveWidgetData<String>(
       'pressColor', colorToHex(pressureColor(pressNum)));
 
-  await HomeWidget.updateWidget(
-    androidName: 'Peugeot205WidgetProvider',
-  );
+  await HomeWidget.updateWidget(androidName: 'Peugeot205WidgetProvider');
 }
 
 void main() async {
@@ -128,7 +129,6 @@ class SensorData {
   });
 
   factory SensorData.fromJson(Map<String, dynamic> json) {
-    bool sim = json['sim'] == true || json['sim'] == 'true';
     return SensorData(
       water: (json['water'] as num?)?.toDouble() ?? 0,
       oil: (json['oil'] as num?)?.toDouble() ?? 0,
@@ -136,7 +136,7 @@ class SensorData {
       waterStatus: (json['waterStatus'] ?? '').toString(),
       oilStatus: (json['oilStatus'] ?? '').toString(),
       pressStatus: (json['pressStatus'] ?? '').toString(),
-      sim: sim,
+      sim: json['sim'] == true || json['sim'] == 'true',
     );
   }
 }
@@ -178,6 +178,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String rawJson = '';
   Timer? pollTimer;
   bool isConnecting = false;
+  bool waterAlertSent = false;
+  bool oilAlertSent = false;
 
   @override
   void dispose() {
@@ -185,21 +187,56 @@ class _DashboardPageState extends State<DashboardPage> {
     super.dispose();
   }
 
+  Future<void> requestBlePermissions() async {
+    await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.locationWhenInUse,
+    ].request();
+  }
+
+  Future<void> checkTemperatureAlerts(SensorData d) async {
+    if (d.water >= 105 && !waterAlertSent) {
+      waterAlertSent = true;
+      await showAlertNotification(
+        'Température eau élevée',
+        'Température eau à ${d.water.toStringAsFixed(1)} °C',
+      );
+    } else if (d.water <= 100) {
+      waterAlertSent = false;
+    }
+
+    if (d.oil >= 105 && !oilAlertSent) {
+      oilAlertSent = true;
+      await showAlertNotification(
+        'Température huile élevée',
+        'Température huile à ${d.oil.toStringAsFixed(1)} °C',
+      );
+    } else if (d.oil <= 100) {
+      oilAlertSent = false;
+    }
+  }
+
   Future<void> _scanAndConnect() async {
     if (isConnecting) return;
+
     setState(() {
       isConnecting = true;
       status = 'Scan BLE...';
     });
 
     try {
+      await requestBlePermissions();
+      await FlutterBluePlus.stopScan();
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
       await Future.delayed(const Duration(seconds: 5));
       await FlutterBluePlus.stopScan();
 
       BluetoothDevice? found;
       for (final r in FlutterBluePlus.lastScanResults) {
-        if (r.device.name == bleDeviceName) {
+        final advName = r.advertisementData.advName;
+        final platformName = r.device.platformName;
+        if (advName == bleDeviceName || platformName == bleDeviceName) {
           found = r.device;
           break;
         }
@@ -207,7 +244,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (found == null) {
         setState(() => status = 'ESP32 introuvable');
-        await showInfoNotification('ESP32 introuvable');
         return;
       }
 
@@ -217,9 +253,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
       final services = await device!.discoverServices();
       for (final s in services) {
-        if (s.uuid.toString() == serviceUuid) {
+        if (s.uuid == serviceUuid) {
           for (final ch in s.characteristics) {
-            if (ch.uuid.toString() == characteristicUuid) {
+            if (ch.uuid == characteristicUuid) {
               targetCharacteristic = ch;
               break;
             }
@@ -229,14 +265,12 @@ class _DashboardPageState extends State<DashboardPage> {
 
       if (targetCharacteristic == null) {
         setState(() => status = 'Caractéristique introuvable');
-        await showInfoNotification('Caractéristique BLE introuvable');
         return;
       }
 
       setState(() => status = 'Connecté');
       await _readOnce();
       _startPolling();
-      await showInfoNotification('Connecté au Peugeot205-ESP32');
     } catch (e) {
       setState(() => status = 'Erreur connexion');
     } finally {
@@ -265,6 +299,7 @@ class _DashboardPageState extends State<DashboardPage> {
       final parsed = SensorData.fromJson(json);
 
       await updateHomeScreenWidget(json);
+      await checkTemperatureAlerts(parsed);
 
       if (!mounted) return;
       setState(() {
@@ -463,14 +498,13 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    final water = data?.water ?? 0;
-    final oil = data?.oil ?? 0;
+    final water = data?.water ?? 20;
+    final oil = data?.oil ?? 20;
     final press = data?.press ?? 0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Peugeot 205'),
-        centerTitle: false,
         backgroundColor: Colors.transparent,
       ),
       body: ListView(
@@ -550,7 +584,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ],
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
         ],
       ),
     );
@@ -623,7 +657,6 @@ class GaugePainter extends CustomPainter {
       canvas.drawLine(p1, p2, tick);
     }
 
-    final needleStart = center;
     final needleEnd = Offset(
       center.dx + math.cos(angle) * (radius - 28),
       center.dy + math.sin(angle) * (radius - 28),
@@ -636,7 +669,7 @@ class GaugePainter extends CustomPainter {
       ..strokeWidth = 6
       ..strokeCap = StrokeCap.round;
 
-    canvas.drawLine(needleStart, needleEnd, needle);
+    canvas.drawLine(center, needleEnd, needle);
     canvas.drawCircle(center, 11, Paint()..color = const Color(0xFFBB7B3C));
     canvas.drawCircle(center, 5, Paint()..color = const Color(0xFFF6E7CD));
   }

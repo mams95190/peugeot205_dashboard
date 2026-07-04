@@ -1,3 +1,9 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+cat > lib/main.dart <<'DART'
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -5,19 +11,9 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-final FlutterLocalNotificationsPlugin notifications =
-    FlutterLocalNotificationsPlugin();
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-  const initSettings = InitializationSettings(android: androidInit);
-  await notifications.initialize(initSettings);
-
+void main() {
   runApp(const MyApp());
 }
 
@@ -128,10 +124,6 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic>? liveJson;
   String lastRawValue = '';
 
-  DateTime? _lastWaterNotif;
-  DateTime? _lastOilNotif;
-  DateTime? _lastPressNotif;
-
   @override
   void dispose() {
     _scanSub?.cancel();
@@ -151,67 +143,11 @@ class _HomePageState extends State<HomePage> {
       locationStatus = await Permission.locationWhenInUse.request();
     } catch (_) {}
 
-    PermissionStatus notifStatus = PermissionStatus.granted;
-    try {
-      notifStatus = await Permission.notification.request();
-    } catch (_) {}
-
     permissionDebug =
-        'scan=$scanStatus | connect=$connectStatus | location=$locationStatus | notif=$notifStatus';
+        'scan=$scanStatus | connect=$connectStatus | location=$locationStatus';
 
     if (mounted) setState(() {});
     return scanStatus.isGranted && connectStatus.isGranted;
-  }
-
-  Future<void> _showAlertNotif(int id, String title, String body) async {
-    const android = AndroidNotificationDetails(
-      'peugeot205_alerts',
-      'Peugeot 205 Alerts',
-      channelDescription: 'Alertes capteurs Peugeot 205',
-      importance: Importance.max,
-      priority: Priority.high,
-      ticker: 'alert',
-    );
-    const details = NotificationDetails(android: android);
-    await notifications.show(id, title, body, details);
-  }
-
-  bool _cooldownPassed(DateTime? last, {int seconds = 25}) {
-    if (last == null) return true;
-    return DateTime.now().difference(last).inSeconds >= seconds;
-  }
-
-  Future<void> _checkThresholdNotifications(Map<String, dynamic> data) async {
-    final water = ((data['water'] ?? 0) as num).toDouble();
-    final oil = ((data['oil'] ?? 0) as num).toDouble();
-    final press = ((data['press'] ?? 0) as num).toDouble();
-
-    if (water >= 112 && _cooldownPassed(_lastWaterNotif)) {
-      _lastWaterNotif = DateTime.now();
-      await _showAlertNotif(
-        1001,
-        'Alerte eau',
-        'Température eau critique: ${water.toStringAsFixed(1)} °C',
-      );
-    }
-
-    if (oil >= 120 && _cooldownPassed(_lastOilNotif)) {
-      _lastOilNotif = DateTime.now();
-      await _showAlertNotif(
-        1002,
-        'Alerte huile',
-        'Température huile critique: ${oil.toStringAsFixed(1)} °C',
-      );
-    }
-
-    if (press < 0.5 && _cooldownPassed(_lastPressNotif)) {
-      _lastPressNotif = DateTime.now();
-      await _showAlertNotif(
-        1003,
-        'Alerte pression',
-        'Pression huile très basse: ${press.toStringAsFixed(2)} bar',
-      );
-    }
   }
 
   Future<void> startScan() async {
@@ -295,7 +231,7 @@ class _HomePageState extends State<HomePage> {
       }
 
       if (target != null) {
-        _notifySub = target.onValueReceived.listen((value) async {
+        _notifySub = target.onValueReceived.listen((value) {
           final txt = _bytesToText(value);
           if (!mounted) return;
 
@@ -309,7 +245,6 @@ class _HomePageState extends State<HomePage> {
               setState(() {
                 liveJson = decoded;
               });
-              await _checkThresholdNotifications(decoded);
             }
           } catch (_) {}
         });
@@ -323,7 +258,6 @@ class _HomePageState extends State<HomePage> {
           final decoded = jsonDecode(txt);
           if (decoded is Map<String, dynamic>) {
             liveJson = decoded;
-            await _checkThresholdNotifications(decoded);
           }
         } catch (_) {}
       }
@@ -682,6 +616,8 @@ class _HomePageState extends State<HomePage> {
                   },
                 ),
                 const SizedBox(height: 18),
+                _bottomInfoCards(),
+                const SizedBox(height: 14),
                 if (lastRawValue.isNotEmpty)
                   Card(
                     shape: RoundedRectangleBorder(
@@ -701,6 +637,60 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomInfoCards() {
+    final water = (liveJson?['water'] ?? 0).toString();
+    final oil = (liveJson?['oil'] ?? 0).toString();
+    final press = (liveJson?['press'] ?? 0).toString();
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        _miniInfoCard('Eau', water, const Color(0xFF55BDE8)),
+        _miniInfoCard('Huile', oil, const Color(0xFFD7A33F)),
+        _miniInfoCard('Pression', press, const Color(0xFFE44A32)),
+      ],
+    );
+  }
+
+  Widget _miniInfoCard(String label, String value, Color color) {
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101419),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.08),
+            blurRadius: 16,
+            spreadRadius: 1,
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                color: Color(0xFFA79E91),
+                fontSize: 12,
+              )),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],
@@ -827,16 +817,6 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('Peugeot 205 · ESP32 BLE'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_active_outlined),
-            onPressed: () async {
-              await _showAlertNotif(
-                9999,
-                'Test notification',
-                'Notifications Peugeot 205 actives',
-              );
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: scanning ? null : startScan,
@@ -1177,3 +1157,12 @@ class _GaugePainter extends CustomPainter {
         oldDelegate.mode != mode;
   }
 }
+DART
+
+git add lib/main.dart
+git commit -m "dashboard v2 visual alerts"
+git push origin main
+
+flutter clean
+flutter pub get
+flutter run

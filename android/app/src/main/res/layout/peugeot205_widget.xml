@@ -1,50 +1,127 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="12dp"
-    android:background="#111111">
+    android:background="#0F1115"
+    android:padding="14dp">
 
     <TextView
         android:id="@+id/widget_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="Peugeot 205"
-        android:textColor="#FFFFFF"
+        android:textColor="#F5EEDF"
         android:textStyle="bold"
-        android:textSize="16sp" />
+        android:textSize="17sp" />
 
     <TextView
         android:id="@+id/widget_mode"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Mode: --"
-        android:textColor="#FFD54F"
-        android:textSize="14sp" />
+        android:layout_alignParentEnd="true"
+        android:text="REEL"
+        android:textColor="#D7A33F"
+        android:textStyle="bold"
+        android:textSize="13sp" />
 
-    <TextView
-        android:id="@+id/widget_water"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:id="@+id/widget_grid"
+        android:layout_below="@id/widget_title"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Eau: --"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp" />
+        android:layout_marginTop="14dp"
+        android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/widget_oil"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Huile: --"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/widget_press"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Pression: --"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp" />
-</LinearLayout>
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:padding="8dp"
+                android:background="#171B21">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="EAU"
+                    android:textColor="#7E8792"
+                    android:textStyle="bold"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/widget_water"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="-- °C"
+                    android:textColor="#55BDE8"
+                    android:textStyle="bold"
+                    android:textSize="22sp" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="8dp"
+                android:layout_height="1dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:padding="8dp"
+                android:background="#171B21">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="HUILE"
+                    android:textColor="#7E8792"
+                    android:textStyle="bold"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/widget_oil"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="-- °C"
+                    android:textColor="#D7A33F"
+                    android:textStyle="bold"
+                    android:textSize="22sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <Space
+            android:layout_width="1dp"
+            android:layout_height="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:background="#171B21">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="PRESSION HUILE"
+                android:textColor="#7E8792"
+                android:textStyle="bold"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/widget_press"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="-- bar"
+                android:textColor="#FF8A00"
+                android:textStyle="bold"
+                android:textSize="24sp" />
+        </LinearLayout>
+    </LinearLayout>
+</RelativeLayout>

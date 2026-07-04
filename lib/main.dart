@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -298,8 +299,6 @@ class _HomePageState extends State<HomePage> {
     return 'id=${r.device.remoteId} | rssi=${r.rssi} | adv="${r.advertisementData.advName}" | name="${r.device.platformName}"';
   }
 
-  // --- UI jauges ---
-
   Color _tempColor(num? t) {
     final v = (t ?? 0).toDouble();
     if (v < 70) return const Color(0xFF55BDE8);
@@ -340,31 +339,34 @@ class _HomePageState extends State<HomePage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // En-tête
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Peugeot 205',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.5,
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Peugeot 205',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Interface d\'origine · BLE + Wi‑Fi',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFFA79E91),
+                      SizedBox(height: 4),
+                      Text(
+                        'Interface d\'origine · BLE + Wi‑Fi',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFA79E91),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -378,7 +380,6 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 16),
-            // Jauges
             LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth > 700;
@@ -431,7 +432,6 @@ class _HomePageState extends State<HomePage> {
               },
             ),
             const SizedBox(height: 18),
-            // JSON brut pour debug
             if (lastRawValue.isNotEmpty)
               Card(
                 shape: RoundedRectangleBorder(
@@ -485,7 +485,7 @@ class _HomePageState extends State<HomePage> {
     required String detail,
     required double size,
   }) {
-    final angle = (-150.0 + pct * 300.0) * (3.1415926535 / 180.0);
+    final angle = (-150.0 + pct * 300.0) * (pi / 180.0);
 
     return Card(
       shape: RoundedRectangleBorder(
@@ -498,19 +498,21 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Top bar
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  title.toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.0,
-                    color: Color(0xFFF2E4CF),
+                Flexible(
+                  child: Text(
+                    title.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                      color: Color(0xFFF2E4CF),
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -531,7 +533,6 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
             const SizedBox(height: 8),
-            // Cadran
             SizedBox(
               width: size,
               height: size,
@@ -680,8 +681,8 @@ class _GaugePainter extends CustomPainter {
       ..strokeWidth = 12
       ..strokeCap = StrokeCap.round;
 
-    final startAngle = -5 * 3.1415926535 / 6; // -150°
-    final sweepAngleFull = 5 * 3.1415926535 / 3; // 300°
+    final startAngle = -5 * pi / 6;
+    final sweepAngleFull = 5 * pi / 3;
 
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius - 6),
@@ -837,12 +838,12 @@ class _GaugePainter extends CustomPainter {
       center.dy + needleLen * sin(angle),
     );
     final baseLeft = Offset(
-      center.dx + 12 * cos(angle + 3.14159 / 2),
-      center.dy + 12 * sin(angle + 3.14159 / 2),
+      center.dx + 12 * cos(angle + pi / 2),
+      center.dy + 12 * sin(angle + pi / 2),
     );
     final baseRight = Offset(
-      center.dx + 12 * cos(angle - 3.14159 / 2),
-      center.dy + 12 * sin(angle - 3.14159 / 2),
+      center.dx + 12 * cos(angle - pi / 2),
+      center.dy + 12 * sin(angle - pi / 2),
     );
 
     final needlePath = Path()
